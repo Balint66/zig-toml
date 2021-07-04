@@ -89,7 +89,7 @@ pub const Table = struct {
     pub fn deinit(self: *Self) void {
         var it = self.keys.iterator();
         while (it.next()) |node| {
-            node.value.deinit();
+            node.value_ptr.deinit();
         }
         self.keys.deinit();
         self.allocator.destroy(self);
@@ -150,14 +150,14 @@ pub const Table = struct {
     }
 
     pub fn addTable(self: *Self, table: *Table) !void {
-        if (self.keys.get(table.name)) |value| {
+        if (self.keys.get(table.name)) |_| {
             return Self.Error.key_already_exists;
         }
         _ = try self.keys.put(table.name, Value{ .Table = table });
     }
 
     pub fn addManyTable(self: *Self, table: *Table) !void {
-        if (self.keys.get(table.name)) |*pair| {
+        if (self.keys.getPtr(table.name)) |pair| {
             if (pair.isManyTables()) {
                 try pair.ManyTables.append(table);
             } else {
@@ -458,9 +458,14 @@ pub const Parser = struct {
                             }
                             if (current_table.keys.get(node.data)) |pair| {
                                 if (pair.isManyTables()) {
-                                    return Parser.Error.malformed_table;
+                                    var manyT = pair.ManyTables;
+                                    var tab = manyT.items[manyT.items.len - 1];
+                                    current_table = tab;
+                                    continue;
                                 }
-                                current_table = pair.Table;
+                                else{
+                                    current_table = pair.Table;
+                                }
                             } else {
                                 current_table = try current_table.addNewTable(node.data);
                             }
@@ -473,6 +478,7 @@ pub const Parser = struct {
                 // add before parsing so then if adding returns an error we get the proper line/column
                 if (is_array) {
                     try current_table.addManyTable(new_table);
+                //    std.log.info("{s}: {}", .{table_name, current_table.keys.get(table_name).?.ManyTables.items.len});
                 } else {
                     try current_table.addTable(new_table);
                 }
@@ -785,11 +791,11 @@ test "basic.toml file" {
     var table = try parseFile(allocator, filename, &parser);
     defer table.deinit();
 
-    assert(table.keys.getValue("foo") != null);
-    if (table.keys.getValue("foo")) |foo| {
+    assert(table.keys.get("foo") != null);
+    if (table.keys.get("foo")) |foo| {
         assert(foo == .Table);
-        assert(foo.Table.keys.getValue("hi") != null);
-        if (foo.Table.keys.getValue("hi")) |value| {
+        assert(foo.Table.keys.get("hi") != null);
+        if (foo.Table.keys.get("hi")) |value| {
             assert(std.mem.eql(u8, value.String, "there"));
         }
     }
@@ -803,7 +809,7 @@ test "comment before newline" {
     , null);
     defer table.deinit();
 
-    var foo = table.keys.getValue("foo").?;
+    var foo = table.keys.get("foo").?;
     assert(std.mem.eql(u8, foo.String, "test"));
 }
 
@@ -819,9 +825,9 @@ test "whitespace before table" {
     , null);
     defer table.deinit();
 
-    var foo = table.keys.getValue("foo").?;
-    var hi = foo.Table.keys.getValue("hi").?;
-    var bar = hi.Table.keys.getValue("bar").?;
+    var foo = table.keys.get("foo").?;
+    var hi = foo.Table.keys.get("hi").?;
+    var bar = hi.Table.keys.get("bar").?;
     assert(bar.Integer == 1234);
 }
 
@@ -850,8 +856,8 @@ test "key value pair" {
     , null);
     defer table.deinit();
 
-    assert(table.keys.getValue("foo") != null);
-    if (table.keys.getValue("foo")) |value| {
+    assert(table.keys.get("foo") != null);
+    if (table.keys.get("foo")) |value| {
         assert(std.mem.eql(u8, value.String, "hello"));
     }
 }
@@ -862,7 +868,7 @@ test "table" {
         \\
     , null);
     defer table.deinit();
-    assert(table.keys.getValue("foo") != null);
+    assert(table.keys.get("foo") != null);
 }
 
 test "comment" {
@@ -871,7 +877,7 @@ test "comment" {
         \\
     , null);
     defer table.deinit();
-    assert(table.keys.getValue("foo") == null);
+    assert(table.keys.get("foo") == null);
 }
 
 test "comment inside array" {
@@ -882,7 +888,7 @@ test "comment inside array" {
         \\
     , null);
     defer table.deinit();
-    var fooKey = table.keys.getValue("foo");
+    var fooKey = table.keys.get("foo");
     assert(fooKey != null);
     if (fooKey) |foo| {
         assert(foo.Array.items.len == 2);
@@ -899,10 +905,10 @@ test "table key value pair" {
     , null);
     defer table.deinit();
 
-    assert(table.keys.getValue("foo") != null);
-    if (table.keys.getValue("foo")) |foo| {
-        assert(foo.Table.keys.getValue("key") != null);
-        if (foo.Table.keys.getValue("key")) |value| {
+    assert(table.keys.get("foo") != null);
+    if (table.keys.get("foo")) |foo| {
+        assert(foo.Table.keys.get("key") != null);
+        if (foo.Table.keys.get("key")) |value| {
             assert(std.mem.eql(u8, value.String, "bar"));
         }
     }
@@ -915,9 +921,9 @@ test "dotted key with string" {
     , null);
     defer table.deinit();
 
-    assert(table.keys.getValue("key") != null);
-    if (table.keys.getValue("key")) |value| {
-        if (value.Table.keys.getValue("ziglang.org")) |zig| {
+    assert(table.keys.get("key") != null);
+    if (table.keys.get("key")) |value| {
+        if (value.Table.keys.get("ziglang.org")) |zig| {
             assert(std.mem.eql(u8, zig.String, "bar"));
         }
     }
@@ -933,18 +939,18 @@ test "multiple tables" {
     , null);
     defer table.deinit();
 
-    assert(table.keys.getValue("foo") != null);
-    if (table.keys.getValue("foo")) |foo| {
-        assert(foo.Table.keys.getValue("key") != null);
-        if (foo.Table.keys.getValue("key")) |value| {
+    assert(table.keys.get("foo") != null);
+    if (table.keys.get("foo")) |foo| {
+        assert(foo.Table.keys.get("key") != null);
+        if (foo.Table.keys.get("key")) |value| {
             assert(std.mem.eql(u8, value.String, "bar"));
         }
     }
 
-    assert(table.keys.getValue("derp") != null);
-    if (table.keys.getValue("derp")) |foo| {
-        assert(foo.Table.keys.getValue("another") != null);
-        if (foo.Table.keys.getValue("another")) |value| {
+    assert(table.keys.get("derp") != null);
+    if (table.keys.get("derp")) |foo| {
+        assert(foo.Table.keys.get("another") != null);
+        if (foo.Table.keys.get("another")) |value| {
             assert(std.mem.eql(u8, value.String, "foobar"));
         }
     }
@@ -957,7 +963,7 @@ test "key value pair with string key" {
     , null);
     defer table.deinit();
 
-    var keyValue = table.keys.getValue("foo");
+    var keyValue = table.keys.get("foo");
     assert(keyValue != null);
     if (keyValue) |value| {
         assert(std.mem.eql(u8, value.String, "hello"));
@@ -971,10 +977,10 @@ test "dotted key value pair" {
     , null);
     defer table.deinit();
 
-    var fooTable = table.keys.getValue("foo");
+    var fooTable = table.keys.get("foo");
     assert(fooTable != null);
     if (fooTable) |foo| {
-        var barKey = foo.Table.keys.getValue("bar");
+        var barKey = foo.Table.keys.get("bar");
         assert(barKey != null);
         if (barKey) |value| {
             assert(std.mem.eql(u8, value.String, "hello"));
@@ -990,12 +996,12 @@ test "dotted key value pair within table" {
     , null);
     defer table.deinit();
 
-    var fooBarTable = table.keys.getValue("foobar");
+    var fooBarTable = table.keys.get("foobar");
     if (fooBarTable) |foobar| {
-        var fooTable = foobar.Table.keys.getValue("foo");
+        var fooTable = foobar.Table.keys.get("foo");
         assert(fooTable != null);
         if (fooTable) |foo| {
-            var barKey = foo.Table.keys.getValue("bar");
+            var barKey = foo.Table.keys.get("bar");
             assert(barKey != null);
             if (barKey) |value| {
                 assert(std.mem.eql(u8, value.String, "hello"));
@@ -1011,7 +1017,7 @@ test "key value pair boolean true" {
     , null);
     defer table.deinit();
 
-    var fooKey = table.keys.getValue("foo");
+    var fooKey = table.keys.get("foo");
     assert(fooKey != null);
     if (fooKey) |foo| {
         assert(foo.Boolean == true);
@@ -1025,7 +1031,7 @@ test "key value pair boolean false" {
     , null);
     defer table.deinit();
 
-    var fooKey = table.keys.getValue("foo");
+    var fooKey = table.keys.get("foo");
     assert(fooKey != null);
     if (fooKey) |foo| {
         assert(foo.Boolean == false);
@@ -1039,7 +1045,7 @@ test "key value pair integer" {
     , null);
     defer table.deinit();
 
-    var fooKey = table.keys.getValue("foo");
+    var fooKey = table.keys.get("foo");
     assert(fooKey != null);
     if (fooKey) |foo| {
         assert(foo.Integer == 1234);
@@ -1053,7 +1059,7 @@ test "key value pair integer" {
     , null);
     defer table.deinit();
 
-    var fooKey = table.keys.getValue("foo");
+    var fooKey = table.keys.get("foo");
     assert(fooKey != null);
     if (fooKey) |foo| {
         assert(foo.Integer == 1123434);
@@ -1067,7 +1073,7 @@ test "key value pair negative integer" {
     , null);
     defer table.deinit();
 
-    var fooKey = table.keys.getValue("foo");
+    var fooKey = table.keys.get("foo");
     assert(fooKey != null);
     if (fooKey) |foo| {
         assert(foo.Integer == -1234);
@@ -1081,7 +1087,7 @@ test "key value pair positive integer" {
     , null);
     defer table.deinit();
 
-    var fooKey = table.keys.getValue("foo");
+    var fooKey = table.keys.get("foo");
     assert(fooKey != null);
     if (fooKey) |foo| {
         assert(foo.Integer == 1234);
@@ -1096,13 +1102,13 @@ test "multiple key value pair" {
     , null);
     defer table.deinit();
 
-    var fooKey = table.keys.getValue("foo");
+    var fooKey = table.keys.get("foo");
     assert(fooKey != null);
     if (fooKey) |foo| {
         assert(foo.Integer == 1234);
     }
 
-    var barKey = table.keys.getValue("bar");
+    var barKey = table.keys.get("bar");
     assert(barKey != null);
     if (barKey) |bar| {
         assert(bar.Integer == 4321);
@@ -1116,7 +1122,7 @@ test "key value simple array" {
     , null);
     defer table.deinit();
 
-    var fooKey = table.keys.getValue("foo");
+    var fooKey = table.keys.get("foo");
     assert(fooKey != null);
     assert(fooKey.? == .Array);
 }
@@ -1128,7 +1134,7 @@ test "key value multiple element array" {
     , null);
     defer table.deinit();
 
-    var fooKey = table.keys.getValue("foo");
+    var fooKey = table.keys.get("foo");
     assert(fooKey != null);
     if (fooKey) |foo| {
         assert(foo.Array.items.len == 5);
@@ -1147,7 +1153,7 @@ test "key value array in array" {
     , null);
     defer table.deinit();
 
-    var fooKey = table.keys.getValue("foo");
+    var fooKey = table.keys.get("foo");
     assert(fooKey != null);
     if (fooKey) |foo| {
         var items = foo.Array.items;
@@ -1172,8 +1178,8 @@ test "key with string first" {
     , null);
     defer table.deinit();
 
-    var fooTable = table.keys.getValue("foo").?;
-    var barKey = fooTable.Table.keys.getValue("bar").?;
+    var fooTable = table.keys.get("foo").?;
+    var barKey = fooTable.Table.keys.get("bar").?;
     assert(std.mem.eql(u8, barKey.String, "foobar"));
 }
 
@@ -1185,9 +1191,9 @@ test "table with dotted identifier" {
     , null);
     defer table.deinit();
 
-    var foo = table.keys.getValue("foo").?;
-    var bar = foo.Table.keys.getValue("bar").?;
-    var testKey = bar.Table.keys.getValue("testKey").?;
+    var foo = table.keys.get("foo").?;
+    var bar = foo.Table.keys.get("bar").?;
+    var testKey = bar.Table.keys.get("testKey").?;
     assert(std.mem.eql(u8, testKey.String, "hello"));
 }
 
@@ -1200,16 +1206,16 @@ test "array of tables" {
     , null);
     defer table.deinit();
 
-    var foo = table.keys.getValue("foo").?;
+    var foo = table.keys.get("foo").?;
     assert(foo.isManyTables());
     assert(foo.ManyTables.items.len == 2);
 
     var one = foo.ManyTables.items[0];
-    var bar = one.keys.getValue("bar").?;
+    var bar = one.keys.get("bar").?;
     assert(std.mem.eql(u8, bar.String, "hi"));
 
     var two = foo.ManyTables.items[1];
-    var bar2 = two.keys.getValue("bar").?;
+    var bar2 = two.keys.get("bar").?;
     assert(std.mem.eql(u8, bar2.String, "test"));
 }
 
@@ -1217,8 +1223,8 @@ test "window line endings" {
     var table = try parseContents(std.testing.allocator, "foo=1234\r\nbar=5789\r\n", null);
     defer table.deinit();
 
-    assert(table.keys.getValue("foo") != null);
-    assert(table.keys.getValue("bar") != null);
+    assert(table.keys.get("foo") != null);
+    assert(table.keys.get("bar") != null);
 }
 
 test "empty inline table" {
@@ -1227,8 +1233,8 @@ test "empty inline table" {
     , null);
     defer table.deinit();
 
-    assert(table.keys.getValue("foo") != null);
-    assert(table.keys.getValue("foo").? == .Table);
+    assert(table.keys.get("foo") != null);
+    assert(table.keys.get("foo").? == .Table);
 }
 
 test "inline table with keys" {
@@ -1237,11 +1243,11 @@ test "inline table with keys" {
     , null);
     defer table.deinit();
 
-    var foo = table.keys.getValue("foo").?.Table;
-    var bar = foo.keys.getValue("bar").?.Integer;
+    var foo = table.keys.get("foo").?.Table;
+    var bar = foo.keys.get("bar").?.Integer;
     assert(bar == 1234);
 
-    var foobar = foo.keys.getValue("foobar").?.String;
+    var foobar = foo.keys.get("foobar").?.String;
     assert(std.mem.eql(u8, foobar, "test string"));
 }
 
@@ -1251,8 +1257,8 @@ test "inline table with inline table" {
     , null);
     defer table.deinit();
 
-    var foo = table.keys.getValue("foo").?.Table;
-    var bar = foo.keys.getValue("bar").?.Table;
-    var foobar = bar.keys.getValue("foobar").?.String;
+    var foo = table.keys.get("foo").?.Table;
+    var bar = foo.keys.get("bar").?.Table;
+    var foobar = bar.keys.get("foobar").?.String;
     assert(std.mem.eql(u8, foobar, "test string"));
 }
