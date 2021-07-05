@@ -717,6 +717,22 @@ pub const Parser = struct {
 
     fn parseString(self: *Parser, opening: u8) ![]const u8 {
         var c = self.rawNextChar();
+        var multiline = false;
+        if(c=='"'){
+            multiline = true;
+            c = self.rawNextChar();
+        }
+        if(multiline){
+            if(c != '"'){
+                return Parser.Error.malformed_multiline_string;
+            }
+            else{
+                c = self.rawNextChar();
+                if(c == '\n'){
+                    c = self.rawNextChar();
+                }
+            }
+        }
         var start = self.getIndex();
         while (c != opening and !isEof(c)) {
             c = self.rawNextChar();
