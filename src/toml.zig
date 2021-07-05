@@ -260,6 +260,7 @@ fn toInteger(word: []const u8) i64 {
 
 pub const Parser = struct {
     const Error = error{
+        malformed_multiline_string,
         unexpected_eof,
         expected_identifier,
         expected_equals,
@@ -413,6 +414,7 @@ pub const Parser = struct {
             c = self.ignoreWhitespace();
 
             if (!has_newline) {
+                std.log.info("{s}", .{self.contents});
                 return Parser.Error.expected_newline;
             }
             has_newline = false;
@@ -745,6 +747,10 @@ pub const Parser = struct {
         // eat the closing quote
         var ending = self.getIndex();
         c = self.nextChar();
+        if(multiline){
+            c = self.nextChar();
+            c = self.nextChar();
+        }
 
         return self.contents[start..ending];
     }
@@ -1277,4 +1283,35 @@ test "inline table with inline table" {
     var bar = foo.keys.get("bar").?.Table;
     var foobar = bar.keys.get("foobar").?.String;
     assert(std.mem.eql(u8, foobar, "test string"));
+}
+
+test "multiline string without starting newline" {
+    var table = try parseContents(std.testing.allocator,
+        \\foo="""The quick brown
+        \\fox jumps over
+        \\the lazy dog"""
+    , null);
+    defer table.deinit();
+    var foo = table.keys.get("foo").?.String;
+    assert(std.mem.eql(u8, foo,
+        \\The quick brown
+        \\fox jumps over
+        \\the lazy dog
+    ));
+}
+
+test "multiline string with starting newline" {
+    var table = try parseContents(std.testing.allocator,
+        \\foo="""
+        \\The quick brown
+        \\fox jumps over
+        \\the lazy dog"""
+    , null);
+    defer table.deinit();
+    var foo = table.keys.get("foo").?.String;
+    assert(std.mem.eql(u8, foo,
+        \\The quick brown
+        \\fox jumps over
+        \\the lazy dog
+    ));
 }
