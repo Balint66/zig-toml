@@ -1,6 +1,6 @@
 pkgs:
   toml:
-    version: 0.0.1
+    version: 0.0.2
     description: "A TOML parser written in Zig"
     license: MIT
     source_url: "https://github.com/Balint66/zig-toml"
